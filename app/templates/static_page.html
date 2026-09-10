@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | إنجاز{% endblock %}
+{% block content %}
+<div class="container page-shell"><nav class="breadcrumb"><a href="{{ url_for('main.home') }}">الرئيسية</a><span>‹</span><strong>{{ title }}</strong></nav><div class="static-layout"><article class="article-card"><span class="eyebrow">إنجاز</span><h1>{{ title }}</h1><div class="article-body"><p>{{ body }}</p><h2>تجربة بسيطة وواضحة</h2><p>نهدف في إنجاز إلى تقديم أدوات مفيدة بواجهة عربية حديثة، مع التركيز على السرعة وسهولة الاستخدام وتقليل الخطوات غير الضرورية.</p></div></article><aside class="side-stack"><div class="side-card"><span>🚀</span><h3>إنجاز أسرع</h3><p>ارجع للرئيسية واستكشف الأدوات حسب القسم.</p><a href="{{ url_for('main.home') }}">استكشف الأدوات ←</a></div></aside></div></div>
+{% endblock %}

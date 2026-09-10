@@ -1,0 +1,338 @@
+(() => {
+  'use strict';
+  const root = document.getElementById('toolRoot');
+  if (!root) return;
+  const type = root.dataset.tool;
+  let timer = null;
+  const $ = (s, p = root) => p.querySelector(s);
+  const val = id => { const e = root.querySelector('#'+id); return e ? e.value : ''; };
+  const num = id => Number(val(id));
+  const esc = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const fmt = (n, d=2) => Number.isFinite(n) ? n.toLocaleString('ar-EG',{maximumFractionDigits:d}) : '—';
+  const err = m => `<div class="error-msg">⚠ ${esc(m)}</div>`;
+  const field = (id,label,opts={}) => { const {type='number',placeholder='',value='',step='any',min,max}=opts; return `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="${type}" placeholder="${esc(placeholder)}" value="${esc(value)}" ${step!==undefined&&type==='number'?`step="${step}"`:''} ${min!==undefined?`min="${min}"`:''} ${max!==undefined?`max="${max}"`:''}></div>`; };
+  const areaField = (id,label,placeholder='اكتب هنا...') => `<div class="field"><label for="${id}">${label}</label><textarea id="${id}" placeholder="${placeholder}"></textarea></div>`;
+  const select = (id,label,items,selected) => `<div class="field"><label for="${id}">${label}</label><select id="${id}">${items.map(([v,t])=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
+  const run = (label='تنفيذ') => `<button class="tool-run" type="button" id="runTool">${label}</button>`;
+  const layout = (html, label='تنفيذ') => `<div class="tool-form">${html}${run(label)}</div>`;
+  const show = (html, copy='') => { const r=document.getElementById('toolResult'); r.hidden=false; r.innerHTML=html; r.dataset.copy=copy || r.innerText; const c=document.getElementById('toolCopy'); if(c)c.hidden=false; r.scrollIntoView({behavior:'smooth',block:'nearest'}); };
+  const bind = fn => $('#runTool')?.addEventListener('click', () => { try { fn(); } catch(e) { show(err('تعذر تنفيذ العملية. تحقق من البيانات المدخلة.')); console.error(e); } });
+  const parseDate = id => { const d=new Date(val(id)); return Number.isNaN(d.getTime())?null:d; };
+  const resultBox = (main, stats=[], note='') => `<div class="result-main copyable">${main}</div>${stats.length?`<div class="result-grid">${stats.map(s=>`<div class="result-stat"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('')}</div>`:''}${note?`<div class="result-note">${note}</div>`:''}`;
+  const set = (html,copy='') => show(html,copy);
+  const now = () => new Date();
+  const daysInYear = y => ((y%4===0&&y%100!==0)||y%400===0)?366:365;
+  const arabicNum = n => new Intl.NumberFormat('ar-EG').format(n);
+
+  function render(html,label){ root.innerHTML=layout(html,label); }
+
+
+  // =========================================================
+  // ENGAZ PDF ENGINE — single, deterministic browser path
+  // =========================================================
+  function fileField(label='اختر ملف'){
+    return `<div class="field"><label>${label}</label><input id="file" type="file"></div>`;
+  }
+
+  const PDF_LIMIT_BYTES = 100 * 1024 * 1024;
+  const pdfAction = key => root.dataset['pdf'+key.charAt(0).toUpperCase()+key.slice(1)] || '';
+  const pdfNames = {
+    images:'engaz-images.pdf', text:'engaz-text.pdf', html:'engaz-html.pdf',
+    csv:'engaz-csv.pdf', json:'engaz-json.pdf', merge:'engaz-merged.pdf',
+    split:'engaz-pages.pdf', extract:'engaz-pages.pdf', rotate:'engaz-rotated.pdf',
+    toImages:'engaz-pdf-images.zip', docx:'engaz-office.pdf', xlsx:'engaz-office.pdf'
+  };
+
+  function pdfDownloadName(kind){ return pdfNames[kind] || 'engaz-output.pdf'; }
+
+  function makePdfRequestId(){
+    const rnd=(globalThis.crypto && typeof globalThis.crypto.randomUUID==='function')
+      ? globalThis.crypto.randomUUID()
+      : Math.random().toString(36).slice(2)+Date.now().toString(36);
+    return `engaz-${Date.now()}-${rnd}`;
+  }
+
+  function downloadBlob(blob,name){
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=name; a.rel='noopener'; a.style.display='none';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+  }
+
+  function validatePdfInputs(box,kind){
+    const controls=[...box.querySelectorAll('input,select,textarea')];
+    for(const el of controls){
+      if(!el.required) continue;
+      const empty=el.type==='file' ? !el.files?.length : !String(el.value||'').trim();
+      if(empty){ el.reportValidity?.(); return false; }
+    }
+    let total=0;
+    for(const el of controls){
+      if(el.type==='file') for(const f of [...(el.files||[])]) total+=f.size||0;
+    }
+    if(total>PDF_LIMIT_BYTES){
+      show(err('إجمالي حجم الملفات يتجاوز 100 ميجابايت.'));
+      return false;
+    }
+    if(kind==='images'){
+      const f=box.querySelector('input[name="files"]');
+      if(!f?.files?.length){ show(err('اختر صورة واحدة على الأقل.')); return false; }
+      if(f.files.length>50){ show(err('الحد الأقصى 50 صورة في العملية الواحدة.')); return false; }
+      const allowed=/\.(jpe?g|png|webp)$/i;
+      const bad=[...f.files].filter(x=>!allowed.test(x.name));
+      if(bad.length){ show(err('يسمح فقط بصور JPG وPNG وWEBP.')); return false; }
+    }
+    if(kind==='merge'){
+      const f=box.querySelector('input[name="files"]');
+      if(!f?.files?.length || f.files.length<2){ show(err('اختر ملفي PDF على الأقل.')); return false; }
+    }
+    return true;
+  }
+
+  async function submitPdfExactlyOnce(box,kind,button,progress){
+    if(window.__ENGAZ_PDF_BUSY || box.dataset.busy==='1') return;
+    if(!validatePdfInputs(box,kind)) return;
+    const action=box.dataset.pdfAction;
+    if(!action){ show(err('خدمة PDF غير متاحة حاليًا.')); return; }
+
+    window.__ENGAZ_PDF_BUSY=true;
+    box.dataset.busy='1';
+    button.disabled=true;
+    button.setAttribute('aria-busy','true');
+    const originalLabel=button.textContent;
+    button.textContent='⏳ جاري إنشاء الملف...';
+    if(progress){ progress.hidden=false; progress.textContent='جاري رفع ومعالجة الملف...'; }
+
+    const fd=new FormData();
+    for(const el of box.querySelectorAll('input,select,textarea')){
+      if(el.disabled || !el.name) continue;
+      if(el.type==='file'){
+        for(const f of [...(el.files||[])]) fd.append(el.name,f,f.name);
+      }else{
+        fd.append(el.name,el.value ?? '');
+      }
+    }
+    const requestId=makePdfRequestId();
+    fd.append('_request_id',requestId);
+
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),180000);
+    try{
+      const res=await fetch(action,{
+        method:'POST', body:fd, credentials:'same-origin', cache:'no-store',
+        headers:{'X-Engaz-Request':requestId,'Accept':'application/pdf,application/zip,application/json'},
+        signal:controller.signal
+      });
+      const ct=(res.headers.get('Content-Type')||'').toLowerCase();
+      if(!res.ok){
+        let message=`فشل إنشاء الملف (HTTP ${res.status}).`;
+        if(ct.includes('json')){
+          try{ const data=await res.json(); message=data.error||data.message||message; }catch(_){ }
+        }else{
+          try{ const text=await res.text(); if(text.trim()) message=text.slice(0,600); }catch(_){ }
+        }
+        throw new Error(message);
+      }
+      const blob=await res.blob();
+      if(!blob.size) throw new Error('الخادم أعاد ملفًا فارغًا.');
+
+      let filename=pdfDownloadName(kind);
+      const disposition=res.headers.get('Content-Disposition')||'';
+      const star=disposition.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+      const plain=disposition.match(/filename="?([^";]+)"?/i);
+      if(star){
+        try{ filename=decodeURIComponent(star[1].trim().replace(/^"|"$/g,'')); }catch(_){ }
+      }else if(plain){ filename=plain[1].trim(); }
+
+      downloadBlob(blob,filename);
+      if(progress) progress.textContent='✓ تم إنشاء الملف وبدء التنزيل.';
+    }catch(e){
+      console.error('[Engaz PDF]',e);
+      const message=e?.name==='AbortError'
+        ? 'انتهت مهلة إنشاء الملف. حاول بملفات أصغر.'
+        : (e?.message || 'تعذر الاتصال بخدمة PDF.');
+      if(progress) progress.textContent='⚠ '+message;
+      show(err(message));
+    }finally{
+      clearTimeout(timeout);
+      window.__ENGAZ_PDF_BUSY=false;
+      box.dataset.busy='0';
+      button.disabled=false;
+      button.removeAttribute('aria-busy');
+      button.textContent=originalLabel;
+    }
+  }
+
+  function serverForm(action,body,note='',kind=''){
+    return `<div class="tool-form pdf-server-form" data-pdf-kind="${esc(kind)}" data-pdf-action="${esc(action)}">${body}<button class="tool-run" type="button" data-pdf-submit>📄 إنشاء وتحميل الملف</button>${note?`<div class="result-note">${note}</div>`:''}<div class="pdf-progress" hidden aria-live="polite"></div></div>`;
+  }
+
+  function bindServerPdfForm(kind){
+    const box=root.querySelector('.pdf-server-form');
+    if(!box) return;
+    const button=box.querySelector('[data-pdf-submit]');
+    const progress=box.querySelector('.pdf-progress');
+    if(!button) return;
+    button.onclick=event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      void submitPdfExactlyOnce(box,kind,button,progress);
+      return false;
+    };
+  }
+
+  function serverPdfTool(kind){
+    const actions={images:'pdfImages',text:'pdfText',html:'pdfHtml',csv:'pdfCsv',json:'pdfJson',merge:'pdfMerge',split:'pdfSplit',extract:'pdfExtract',rotate:'pdfRotate',toImages:'pdfToImages',docx:'pdfDocx',xlsx:'pdfXlsx'};
+    const action=root.dataset[actions[kind]]||'';
+    if(!action){ root.innerHTML=err('مسار خدمة PDF غير متاح.'); return; }
+    let body='';
+    if(kind==='images') body=`<div class="field"><label for="pdf-files">اختر الصور</label><input id="pdf-files" name="files" type="file" accept="image/png,image/jpeg,image/webp" multiple required></div><div class="fields-2"><div class="field"><label>حجم الصفحة</label><select name="page"><option value="a4">A4</option><option value="a5">A5</option><option value="letter">Letter</option></select></div></div>`;
+    else if(kind==='text') body=`<div class="field"><label>عنوان الملف</label><input name="title" value="إنجاز — ملف PDF"></div><div class="field"><label>النص</label><textarea name="text" rows="16" placeholder="اكتب النص العربي أو الإنجليزي هنا..." required></textarea></div>`;
+    else if(kind==='html') body=`<div class="field"><label>عنوان الملف</label><input name="title" value="إنجاز — HTML"></div><div class="field"><label>HTML</label><textarea name="data" rows="16" placeholder="&lt;h1&gt;عنوان&lt;/h1&gt;\n&lt;p&gt;المحتوى...&lt;/p&gt;" required></textarea></div>`;
+    else if(kind==='csv') body=`<div class="field"><label>عنوان الملف</label><input name="title" value="إنجاز — CSV"></div><div class="field"><label>بيانات CSV</label><textarea name="data" rows="14" placeholder="الاسم,الكمية,السعر&#10;منتج 1,10,25" required></textarea></div>`;
+    else if(kind==='json') body=`<div class="field"><label>عنوان الملف</label><input name="title" value="إنجاز — JSON"></div><div class="field"><label>JSON</label><textarea name="data" rows="14" placeholder='{"name":"Engaz","version":2}' required></textarea></div>`;
+    else if(kind==='merge') body=`<div class="field"><label>ملفات PDF — اختر ملفين أو أكثر</label><input name="files" type="file" accept="application/pdf,.pdf" multiple required></div>`;
+    else if(kind==='split'||kind==='extract') body=`<div class="field"><label>ملف PDF</label><input name="file" type="file" accept="application/pdf,.pdf" required></div><div class="field"><label>الصفحات</label><input name="pages" type="text" placeholder="مثال: 1,3,5 أو 2-4" required></div>`;
+    else if(kind==='rotate') body=`<div class="field"><label>ملف PDF</label><input name="file" type="file" accept="application/pdf,.pdf" required></div><div class="field"><label>زاوية الدوران</label><select name="degrees"><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div>`;
+    else if(kind==='toImages') body=`<div class="field"><label>ملف PDF</label><input name="file" type="file" accept="application/pdf,.pdf" required></div><div class="fields-2"><div class="field"><label>الصيغة</label><select name="format"><option value="png">PNG</option><option value="jpg">JPG</option></select></div><div class="field"><label>الدقة DPI</label><input name="dpi" type="number" value="150" min="72" max="300"></div></div>`;
+    else body=`<div class="field"><label>ملف Office</label><input name="file" type="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp" required></div>`;
+    root.innerHTML=serverForm(action,body,'حد أقصى 100MB للعملية. يتم إنشاء الملف على خادم إنجاز ثم تنزيله مباشرة.',kind);
+    bindServerPdfForm(kind);
+  }
+
+  function watermarkTool(){root.innerHTML=`<div class="tool-form">${fileField('الصورة')}${field('text','نص العلامة المائية',{type:'text',placeholder:'إنجاز'})}<div class="fields-2">${field('opacity','الشفافية %',{value:'35',min:5,max:100})}${field('size','حجم النص',{value:'32',min:10,max:120})}</div><button id="runTool" class="tool-run">إضافة العلامة المائية</button></div>`;$('#file').accept='image/*';bind(()=>processCanvasImage('watermark'))}
+  function imageMergeTool(){root.innerHTML=`<div class="tool-form"><div class="field"><label>الصور</label><input id="files" type="file" accept="image/*" multiple></div>${select('direction','الاتجاه',[['vertical','رأسي'],['horizontal','أفقي']],'vertical')}<button id="runTool" class="tool-run">دمج الصور</button></div>`;bind(async()=>{const fs=[...$('#files').files];if(fs.length<2)return set(err('اختر صورتين على الأقل.'));const imgs=await Promise.all(fs.map(f=>readDataURL(f).then(loadImage)));const maxW=Math.max(...imgs.map(i=>i.width)),maxH=Math.max(...imgs.map(i=>i.height));const vertical=val('direction')==='vertical',canvas=document.createElement('canvas');canvas.width=vertical?maxW*1:imgs.reduce((s,i)=>s+i.width,0);canvas.height=vertical?imgs.reduce((s,i)=>s+i.height,0):maxH;const ctx=canvas.getContext('2d');let pos=0;imgs.forEach(i=>{if(vertical){ctx.drawImage(i,(canvas.width-i.width)/2,pos);pos+=i.height}else{ctx.drawImage(i,pos,(canvas.height-i.height)/2);pos+=i.width}});canvas.toBlob(b=>{const u=URL.createObjectURL(b);set(`<div style="text-align:center"><img src="${u}" style="max-width:100%;border-radius:12px"><br><a class="primary-btn" href="${u}" download="engaz-merged.jpg">⬇ حفظ الصورة</a></div>`,'تم دمج الصور')},'image/jpeg',.92)})}
+  function imageBatchTool(){root.innerHTML=`<div class="tool-form"><div class="field"><label>الصور</label><input id="files" type="file" accept="image/*" multiple></div>${field('width','العرض',{min:1,value:'1200'})}<button id="runTool" class="tool-run">تغيير الحجم</button></div>`;bind(async()=>{const fs=[...$('#files').files],w=num('width');if(!fs.length||w<=0)return set(err('اختر الصور وأدخل العرض.'));const urls=[];for(const f of fs){const img=await loadImage(await readDataURL(f));const h=Math.round(img.height*w/img.width);const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);const b=await new Promise(r=>c.toBlob(r,'image/jpeg',.9));urls.push({u:URL.createObjectURL(b),n:f.name.replace(/\.[^.]+$/,'')+'-engaz.jpg'})}set(`<div class="result-grid">${urls.map(x=>`<div><a href="${x.u}" download="${esc(x.n)}" class="primary-btn">⬇ ${esc(x.n)}</a></div>`).join('')}</div>`,`${urls.length} صور جاهزة`)})}
+  function passwordStrengthTool(){root.innerHTML=`<div class="tool-form">${field('password','كلمة المرور',{type:'password'})}<button id="runTool" class="tool-run">فحص القوة</button></div>`;bind(()=>{const p=val('password');if(!p)return set(err('أدخل كلمة المرور.'));let score=0;if(p.length>=8)score++;if(p.length>=12)score++;if(/[a-z]/.test(p)&&/[A-Z]/.test(p))score++;if(/\d/.test(p))score++;if(/[^A-Za-z0-9]/.test(p))score++;const label=score<=2?'ضعيفة':score<=3?'متوسطة':score===4?'قوية':'قوية جدًا';set(resultBox(label,[[p.length,'عدد الأحرف'],[score+'/5','الدرجة']]),label)})}
+  async function hashTool(){root.innerHTML=`<div class="tool-form">${areaField('text','النص')}<div class="fields-2">${select('algo','الخوارزمية',[['SHA-256','SHA-256'],['SHA-1','SHA-1']],'SHA-256')}</div><button id="runTool" class="tool-run">إنشاء Hash</button></div>`;bind(async()=>{const data=new TextEncoder().encode(val('text'));const buf=await crypto.subtle.digest(val('algo'),data);const x=Array.from(new Uint8Array(buf),b=>b.toString(16).padStart(2,'0')).join('');set(`<pre class="copyable">${x}</pre>`,x)})}
+  function yamlJsonTool(){root.innerHTML=`<div class="tool-form">${areaField('text','JSON','{"name":"Engaz","version":2}')}<button id="runTool" class="tool-run">JSON → YAML مبسط</button></div><div class="result-note">هذا المحول يدعم JSON إلى YAML المبسط للقيم والأشياء المتداخلة الأساسية.</div>`;bind(()=>{try{const o=JSON.parse(val('text'));const y=simpleYaml(o);set(`<pre class="copyable">${esc(y)}</pre>`,y)}catch(e){set(err('JSON غير صالح.'))}})}
+  function simpleYaml(o,indent=0){const pad=' '.repeat(indent);if(o===null)return'null';if(typeof o!=='object')return typeof o==='string'?JSON.stringify(o):String(o);let out='';if(Array.isArray(o))o.forEach(v=>{out+=pad+'- '+(typeof v==='object'?`\n${simpleYaml(v,indent+2)}`:simpleYaml(v,0))+'\n'});else Object.entries(o).forEach(([k,v])=>{if(v&&typeof v==='object')out+=pad+k+':\n'+simpleYaml(v,indent+2);else out+=pad+k+': '+simpleYaml(v,0)+'\n'});return out.trimEnd()}
+  function sqlFormatTool(){root.innerHTML=`<div class="tool-form">${areaField('text','SQL','SELECT * FROM users WHERE id=1 AND active=1 ORDER BY name;')}<button id="runTool" class="tool-run">تنسيق SQL</button></div>`;bind(()=>{let x=val('text').replace(/\s+/g,' ').trim();['SELECT','FROM','WHERE','GROUP BY','ORDER BY','HAVING','LIMIT','LEFT JOIN','RIGHT JOIN','INNER JOIN','OUTER JOIN','JOIN','VALUES','SET','AND','OR'].forEach(k=>{x=x.replace(new RegExp('\\s*'+k.replace(' ','\\s+')+'\\s*','ig'),'\n'+k+' ')});x=x.replace(/^\n/,'').replace(/\s*,\s*/g,',\n  ');set(`<pre class="copyable">${esc(x)}</pre>`,x)})}
+  function colorConvertTool(){root.innerHTML=`<div class="tool-form">${field('hex','HEX',{type:'text',value:'#5b5cf0'})}<button id="runTool" class="tool-run">تحويل</button></div>`;bind(()=>{let h=val('hex').replace('#','').trim();if(!/^[0-9a-f]{6}$/i.test(h))return set(err('أدخل HEX من 6 أرقام.'));const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4),16);const mx=Math.max(r,g,b)/255,mn=Math.min(r,g,b)/255,d=mx-mn,l=(mx+mn)/2;let hh=0,s=0;if(d){s=d/(1-Math.abs(2*l-1));if(mx===r)hh=60*((g-b)/255/d%6);else if(mx===g)hh=60*((b-r)/255/d+2);else hh=60*((r-g)/255/d+4);if(hh<0)hh+=360}const out=`RGB(${r}, ${g}, ${b}) — HSL(${hh.toFixed(1)}, ${(s*100).toFixed(1)}%, ${(l*100).toFixed(1)}%)`;set(resultBox(out),out)})}
+  function cronTool(){root.innerHTML=`<div class="tool-form"><div class="fields-2">${select('min','الدقيقة',[['0','00'],['15','15'],['30','30'],['45','45']],'0')}${select('hour','الساعة',[['*','كل ساعة'],...Array.from({length:24},(_,i)=>[String(i),String(i).padStart(2,'0')])],'*')}</div><div class="fields-2">${select('dom','اليوم من الشهر',[['*','كل يوم'],...Array.from({length:31},(_,i)=>[String(i+1),String(i+1)])],'*')}${select('dow','يوم الأسبوع',[['*','كل يوم'],['1','الإثنين'],['2','الثلاثاء'],['3','الأربعاء'],['4','الخميس'],['5','الجمعة'],['6','السبت'],['0','الأحد']],'*')}</div><button id="runTool" class="tool-run">إنشاء Cron</button></div>`;bind(()=>{const x=`${val('min')} ${val('hour')} ${val('dom')} * ${val('dow')}`;set(resultBox(x),x)})}
+  function processCanvasImage(mode){const f=$('#file').files[0];if(!f)return set(err('اختر صورة.'));loadImageFromFile(f).then(img=>{const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const x=c.getContext('2d');x.drawImage(img,0,0);x.globalAlpha=num('opacity')/100;x.fillStyle='#000';x.font=`700 ${num('size')}px Cairo,Arial`;x.textAlign='center';x.textBaseline='middle';x.translate(c.width/2,c.height/2);x.rotate(-Math.PI/6);x.fillText(val('text'),0,0);c.toBlob(b=>{const u=URL.createObjectURL(b);set(`<div style="text-align:center"><img src="${u}" style="max-width:100%"><br><a class="primary-btn" href="${u}" download="engaz-watermark.jpg">⬇ حفظ</a></div>`,'تمت إضافة العلامة المائية')},'image/jpeg',.92)})}
+  const readDataURL=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f)});
+  const loadImage=src=>new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src});
+  const loadImageFromFile=f=>readDataURL(f).then(loadImage);
+
+  function init(){
+    if(timer){clearInterval(timer);timer=null;}
+    switch(type){
+      case 'age': render(field('birth','تاريخ الميلاد',{type:'date'}),'احسب العمر'); bind(()=>{const d=parseDate('birth');if(!d)return set(err('اختر تاريخ الميلاد.'));const t=now();if(d>t)return set(err('تاريخ الميلاد لا يمكن أن يكون في المستقبل.'));let y=t.getFullYear()-d.getFullYear(),m=t.getMonth()-d.getMonth(),day=t.getDate()-d.getDate();if(day<0){m--;day+=new Date(t.getFullYear(),t.getMonth(),0).getDate()}if(m<0){y--;m+=12}set(resultBox(`${y} سنة`,[[m,'شهر إضافي'],[day,'يوم إضافي']],'العمر محسوب حتى اليوم.'),`${y} سنة، ${m} شهر، ${day} يوم`);}); break;
+      case 'percentage': render(field('a','القيمة')+field('b','النسبة %'),'احسب'); bind(()=>{const a=num('a'),b=num('b');if(!Number.isFinite(a)||!Number.isFinite(b))return set(err('أدخل القيمتين.'));const x=a*b/100;set(resultBox(fmt(x),[[fmt(a),'القيمة الأصلية'],[fmt(b)+'%','النسبة']]),fmt(x));});break;
+      case 'discount': render(`<div class="fields-2">${field('price','السعر')}${field('discount','الخصم %')}</div>`,'احسب السعر');bind(()=>{const p=num('price'),d=num('discount');if(p<0||d<0)return set(err('أدخل أرقامًا صحيحة.'));const save=p*d/100,total=p-save;set(resultBox(fmt(total),[[fmt(save),'قيمة الخصم'],[fmt(d)+'%','نسبة الخصم']]),fmt(total));});break;
+      case 'percent-change': render(`<div class="fields-2">${field('old','القيمة القديمة')}${field('new','القيمة الجديدة')}</div>`,'احسب التغير');bind(()=>{const a=num('old'),b=num('new');if(a===0)return set(err('القيمة القديمة لا يمكن أن تكون صفرًا.'));const p=(b-a)/Math.abs(a)*100;set(resultBox((p>=0?'+':'')+fmt(p)+'%',[[fmt(b-a),'مقدار التغير'],[p>=0?'زيادة':'انخفاض','الاتجاه']]),fmt(p)+'%');});break;
+      case 'bmi': render(`<div class="fields-2">${field('weight','الوزن (كجم)')}${field('height','الطول (سم)')}</div>`,'احسب BMI');bind(()=>{const w=num('weight'),h=num('height')/100;if(w<=0||h<=0)return set(err('أدخل وزنًا وطولًا صحيحين.'));const b=w/(h*h);const cat=b<18.5?'نقص وزن':b<25?'طبيعي':b<30?'زيادة وزن':'سمنة';set(resultBox(fmt(b,1),[[cat,'التصنيف'],[fmt(w)+' كجم','الوزن']]),fmt(b,1)+' — '+cat);});break;
+      case 'calories': render(`<div class="fields-2">${field('weight','الوزن كجم')}${field('height','الطول سم')}</div><div class="fields-2">${field('age','العمر بالسنوات')}${select('gender','النوع',[['m','ذكر'],['f','أنثى']],'m')}</div>`,'احسب السعرات');bind(()=>{const w=num('weight'),h=num('height'),a=num('age'),g=val('gender');if(w<=0||h<=0||a<=0)return set(err('أدخل البيانات كاملة.'));const bmr=g==='m'?10*w+6.25*h-5*a+5:10*w+6.25*h-5*a-161;set(resultBox(fmt(bmr,0)+' سعرة/يوم',[[fmt(bmr*1.2,0),'نشاط خفيف'],[fmt(bmr*1.375,0),'نشاط متوسط'],[fmt(bmr*1.55,0),'نشاط عالٍ']]),fmt(bmr,0));});break;
+      case 'tip': render(`<div class="fields-2">${field('bill','قيمة الفاتورة')}${field('tip','نسبة الإكرامية %',{value:'10'})}</div>`,'احسب');bind(()=>{const b=num('bill'),p=num('tip');if(b<0)return set(err('أدخل فاتورة صحيحة.'));const t=b*p/100;set(resultBox(fmt(b+t),[[fmt(t),'الإكرامية'],[fmt(b),'قبل الإكرامية']]),fmt(b+t));});break;
+      case 'average': render(areaField('numbers','الأرقام — افصل بينها بفاصلة أو مسافة'),'احسب المتوسط');bind(()=>{const a=val('numbers').split(/[\s,،]+/).map(Number).filter(Number.isFinite);if(!a.length)return set(err('أدخل أرقامًا.'));const avg=a.reduce((x,y)=>x+y,0)/a.length;set(resultBox(fmt(avg),[[a.length,'عدد القيم'],[fmt(Math.min(...a)),'الأصغر'],[fmt(Math.max(...a)),'الأكبر']]),fmt(avg));});break;
+      case 'gpa': render(`<div class="fields-2">${field('points','مجموع النقاط')}${field('hours','إجمالي الساعات')}</div>`,'احسب GPA');bind(()=>{const p=num('points'),h=num('hours');if(h<=0)return set(err('الساعات يجب أن تكون أكبر من صفر.'));const g=p/h;set(resultBox(fmt(g,2),[[fmt(p),'النقاط'],[fmt(h),'الساعات']]),fmt(g,2));});break;
+      case 'area': root.innerHTML=layout(select('shape','الشكل',[['rect','مستطيل'],['square','مربع'],['circle','دائرة'],['triangle','مثلث']],'rect')+'<div id="shapeFields"></div>','احسب المساحة'); updateAreaFields(); $('#shape')?.addEventListener('change',updateAreaFields); bind(()=>{const s=val('shape');let a=0;if(s==='rect')a=num('a')*num('b');if(s==='square')a=num('a')**2;if(s==='circle')a=Math.PI*num('a')**2;if(s==='triangle')a=num('a')*num('b')/2;if(!Number.isFinite(a)||a<=0)return set(err('أدخل القياسات المطلوبة.'));set(resultBox(fmt(a,3),[[s==='circle'?'πr²':'—','طريقة الحساب']]),fmt(a,3));});break;
+      case 'volume': root.innerHTML=layout(select('shape','الشكل',[['box','متوازي مستطيلات'],['cube','مكعب'],['sphere','كرة'],['cylinder','أسطوانة']],'box')+'<div id="shapeFields"></div>','احسب الحجم'); updateVolumeFields();$('#shape')?.addEventListener('change',updateVolumeFields);bind(()=>{const s=val('shape');let v=0;if(s==='box')v=num('a')*num('b')*num('c');if(s==='cube')v=num('a')**3;if(s==='sphere')v=4/3*Math.PI*num('a')**3;if(s==='cylinder')v=Math.PI*num('a')**2*num('b');if(!Number.isFinite(v)||v<=0)return set(err('أدخل القياسات المطلوبة.'));set(resultBox(fmt(v,3)),fmt(v,3));});break;
+      case 'triangle': render(`<div class="fields-2">${field('a','الضلع الأول')}${field('b','الضلع الثاني')}</div>${field('c','الضلع الثالث')}`,'تحقق من المثلث');bind(()=>{const a=num('a'),b=num('b'),c=num('c');const ok=a+b>c&&a+c>b&&b+c>a;if([a,b,c].some(x=>x<=0))return set(err('الأضلاع يجب أن تكون موجبة.'));set(resultBox(ok?'مثلث صالح':'مثلث غير صالح',[[ok?'✓':'✕','نتيجة التحقق'],[fmt(a+b-c,2),'a + b − c']]),ok?'مثلث صالح':'مثلث غير صالح');});break;
+      case 'loan': render(`<div class="fields-2">${field('amount','قيمة القرض')}${field('rate','الفائدة السنوية %')}</div>${field('months','عدد الأشهر')}`,'احسب القسط');bind(()=>{const P=num('amount'),annual=num('rate'),n=num('months');if(P<=0||n<=0)return set(err('أدخل قيمة قرض وعدد أشهر صحيحين.'));const r=annual/100/12,m=r?P*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1):P/n,total=m*n;set(resultBox(fmt(m,2),[[fmt(total,2),'إجمالي السداد'],[fmt(total-P,2),'إجمالي الفائدة']]),fmt(m,2));});break;
+      case 'compound':
+      case 'compound-interest': render(`<div class="fields-2">${field('principal','رأس المال')}${field('rate','العائد السنوي %')}</div><div class="fields-2">${field('years','عدد السنوات')}${field('times','مرات التركيب سنويًا',{value:'12'})}</div>`,'احسب العائد');bind(()=>{const P=num('principal'),r=num('rate')/100,y=num('years'),n=num('times');if(P<=0||y<0||n<=0)return set(err('تحقق من البيانات.'));const A=P*Math.pow(1+r/n,n*y);set(resultBox(fmt(A,2),[[fmt(A-P,2),'الربح'],[fmt(P,2),'رأس المال']]),fmt(A,2));});break;
+      case 'margin': render(`<div class="fields-2">${field('cost','تكلفة المنتج')}${field('sale','سعر البيع')}</div>`,'احسب الهامش');bind(()=>{const c=num('cost'),s=num('sale');if(s<=0)return set(err('سعر البيع يجب أن يكون أكبر من صفر.'));const profit=s-c,margin=profit/s*100;set(resultBox(fmt(margin,2)+'%',[[fmt(profit,2),'الربح'],[fmt(c,2),'التكلفة']]),fmt(margin,2)+'%');});break;
+      case 'markup': render(`<div class="fields-2">${field('cost','التكلفة')}${field('markup','نسبة الزيادة %')}</div>`,'احسب سعر البيع');bind(()=>{const c=num('cost'),p=num('markup');if(c<0)return set(err('أدخل التكلفة.'));const profit=c*p/100,s=c+profit;set(resultBox(fmt(s,2),[[fmt(profit,2),'الربح'],[fmt(p)+'%','نسبة الزيادة']]),fmt(s,2));});break;
+      case 'vat': render(`<div class="fields-2">${field('price','المبلغ')}${field('vat','ضريبة القيمة المضافة %',{value:'14'})}</div>${select('mode','العملية',[['add','إضافة الضريبة'],['remove','استخراج الضريبة']],'add')}`,'احسب الضريبة');bind(()=>{const p=num('price'),v=num('vat')/100,m=val('mode');if(p<0||v<0)return set(err('تحقق من القيم.'));let net,tax,total;if(m==='add'){net=p;tax=p*v;total=p+tax}else{total=p;net=p/(1+v);tax=p-net}set(resultBox(fmt(total,2),[[fmt(net,2),'قبل الضريبة'],[fmt(tax,2),'قيمة الضريبة']]),fmt(total,2));});break;
+      case 'break-even': render(`<div class="fields-3">${field('fixed','التكاليف الثابتة')}${field('price','سعر الوحدة')}${field('variable','تكلفة الوحدة')}</div>`,'احسب نقطة التعادل');bind(()=>{const f=num('fixed'),p=num('price'),v=num('variable');if(p<=v)return set(err('سعر الوحدة يجب أن يكون أكبر من التكلفة المتغيرة.'));const units=f/(p-v),rev=units*p;set(resultBox(fmt(units,2)+' وحدة',[[fmt(rev,2),'إيراد نقطة التعادل'],[fmt(p-v,2),'هامش الوحدة']]),fmt(units,2)+' وحدة');});break;
+      case 'currency': render(`<div class="fields-3">${field('amount','المبلغ')}${field('rate','سعر التحويل',{value:'1'})}${field('result','— النتيجة',{type:'text'})}</div><div class="result-note">أدخل سعر التحويل يدويًا. مثال: 1 دولار = 48 جنيه، أدخل 48.</div>${select('from','من',[['EGP','جنيه مصري'],['USD','دولار'],['EUR','يورو'],['GBP','جنيه إسترليني'],['SAR','ريال سعودي'],['AED','درهم إماراتي'],['QAR','ريال قطري']],'USD')}${select('to','إلى',[['EGP','جنيه مصري'],['USD','دولار'],['EUR','يورو'],['GBP','جنيه إسترليني'],['SAR','ريال سعودي'],['AED','درهم إماراتي'],['QAR','ريال قطري']],'EGP')}`,'تحويل العملة');bind(()=>{const a=num('amount'),r=num('rate');if(a<0||r<=0)return set(err('أدخل مبلغًا وسعر تحويل صحيحين.'));const x=a*r;set(resultBox(fmt(x,2)+' '+val('to'),[[fmt(a,2)+' '+val('from'),'المبلغ الأصلي'],[fmt(r,6),'سعر التحويل']]),fmt(x,2)+' '+val('to'));});break;
+      case 'length': converter('الطول',[['m','متر',1],['km','كيلومتر',1000],['cm','سنتيمتر',.01],['mm','ملليمتر',.001],['mi','ميل',1609.344],['yd','ياردة',.9144],['ft','قدم',.3048],['in','بوصة',.0254]],'m');break;
+      case 'weight': converter('الوزن',[['kg','كيلوجرام',1],['g','جرام',.001],['mg','ملليجرام',1e-6],['lb','رطل',.45359237],['oz','أونصة',.0283495]],'kg');break;
+      case 'speed': converter('السرعة',[['mps','متر/ثانية',1],['kmh','كم/ساعة',.277777778],['mph','ميل/ساعة',.44704],['knot','عقدة',.514444]],'kmh');break;
+      case 'data': converter('البيانات',[['byte','بايت',1],['kb','KB',1024],['mb','MB',1048576],['gb','GB',1073741824],['tb','TB',1099511627776]],'mb');break;
+      case 'temperature': render(`<div class="fields-2">${field('value','القيمة')}${select('from','من',[['c','مئوية °C'],['f','فهرنهايت °F'],['k','كلفن K']],'c')}</div>${select('to','إلى',[['c','مئوية °C'],['f','فهرنهايت °F'],['k','كلفن K']],'f')}`,'تحويل');bind(()=>{let x=num('value'),f=val('from'),t=val('to');if(f==='c'&&t==='f')x=x*9/5+32;else if(f==='c'&&t==='k')x+=273.15;else if(f==='f'&&t==='c')x=(x-32)*5/9;else if(f==='f'&&t==='k')x=(x-32)*5/9+273.15;else if(f==='k'&&t==='c')x-=273.15;else if(f==='k'&&t==='f')x=(x-273.15)*9/5+32;set(resultBox(fmt(x,4)),fmt(x,4));});break;
+      case 'area-convert': converter('المساحة',[['m2','م²',1],['km2','كم²',1e6],['cm2','سم²',.0001],['ft2','قدم²',.092903],['acre','فدان/acre',4046.8564224]],'m2');break;
+      case 'volume-convert': converter('الحجم',[['l','لتر',1],['ml','ملليلتر',.001],['m3','م³',1000],['gal','جالون أمريكي',3.785411784],['cup','كوب',.2365882365]],'l');break;
+      case 'time-convert': converter('الوقت',[['sec','ثانية',1],['min','دقيقة',60],['hour','ساعة',3600],['day','يوم',86400],['week','أسبوع',604800]],'hour');break;
+      case 'number-base': render(`<div class="fields-2">${field('number','الرقم',{type:'text'})}${select('from','الأساس',[['2','ثنائي'],['8','ثماني'],['10','عشري'],['16','سداسي عشري']],'10')}</div>${select('to','إلى',[['2','ثنائي'],['8','ثماني'],['10','عشري'],['16','سداسي عشري']],'16')}`,'تحويل');bind(()=>{const n=parseInt(val('number').trim(),Number(val('from')));if(Number.isNaN(n))return set(err('الرقم غير صالح لهذا الأساس.'));const x=n.toString(Number(val('to'))).toUpperCase();set(resultBox(x),x);});break;
+      case 'word-count': textStats('عداد الكلمات',true);break;
+      case 'char-count': textStats('عداد الأحرف',false);break;
+      case 'text-clean': render(areaField('text','النص')+`<div class="fields-2">${select('spaces','المسافات',[['trim','إزالة الزائدة فقط'],['all','توحيد كل المسافات']],'all')}${select('blanks','الأسطر الفارغة',[['keep','إبقاء'],['remove','حذف']],'remove')}</div>`,'تنظيف النص');bind(()=>{let t=val('text').replace(/\r\n?/g,'\n');if(val('spaces')==='all')t=t.split('\n').map(x=>x.trim().replace(/\s+/g,' ')).join('\n');else t=t.split('\n').map(x=>x.trim()).join('\n');if(val('blanks')==='remove')t=t.split('\n').filter(Boolean).join('\n');set(`<pre class="copyable">${esc(t)}</pre>`,t);});break;
+      case 'duplicates': render(areaField('text','سطر في كل عنصر'),'إزالة التكرار');bind(()=>{const a=val('text').split(/\n/);const seen=new Set(),out=[];a.forEach(x=>{const k=x.trim();if(k&&!seen.has(k)){seen.add(k);out.push(x)}});set(resultBox(`<pre class="copyable">${esc(out.join('\n'))}</pre>`,[[out.length,'عناصر فريدة'],[a.filter(x=>x.trim()).length-out.length,'مكرر']]),out.join('\n'));});break;
+      case 'sort-lines': render(areaField('text','الأسطر')+select('order','الترتيب',[['asc','تصاعدي'],['desc','تنازلي']],'asc'),'ترتيب الأسطر');bind(()=>{let a=val('text').split('\n').filter(x=>x.trim());a.sort((x,y)=>val('order')==='asc'?x.localeCompare(y,'ar'):y.localeCompare(x,'ar'));set(`<pre class="copyable">${esc(a.join('\n'))}</pre>`,a.join('\n'));});break;
+      case 'reverse': render(areaField('text','النص'),'عكس النص');bind(()=>{const t=val('text');const x=[...t].reverse().join('');set(`<pre class="copyable">${esc(x)}</pre>`,x);});break;
+      case 'case': render(areaField('text','النص')+select('mode','التحويل',[['upper','UPPERCASE'],['lower','lowercase'],['title','Title Case']],'lower'),'تحويل');bind(()=>{const t=val('text'),m=val('mode');let x=m==='upper'?t.toUpperCase():m==='lower'?t.toLowerCase():t.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());set(`<pre class="copyable">${esc(x)}</pre>`,x);});break;
+      case 'extract-emails': extractor('البريد الإلكتروني',/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);break;
+      case 'extract-urls': extractor('الروابط',/https?:\/\/[^\s<]+/gi);break;
+      case 'line-breaks': render(areaField('text','النص')+select('mode','المعالجة',[['unix','توحيد إلى Unix (LF)'],['trim','إزالة المسافات من نهاية السطر'],['remove','إزالة فواصل الأسطر واستبدالها بمسافة']],'unix'),'معالجة النص');bind(()=>{let t=val('text').replace(/\r\n?/g,'\n');if(val('mode')==='trim')t=t.split('\n').map(x=>x.trimEnd()).join('\n');if(val('mode')==='remove')t=t.replace(/\n+/g,' ');set(`<pre class="copyable">${esc(t)}</pre>`,t);});break;
+      case 'random': render(`<div class="fields-2">${field('min','من',{value:'1'})}${field('max','إلى',{value:'100'})}</div>${field('count','عدد النتائج',{value:'1',min:1,max:100})}`,'توليد');bind(()=>{let a=num('min'),b=num('max'),n=Math.min(100,Math.max(1,num('count')));if(a>b)[a,b]=[b,a];const x=Array.from({length:n},()=>Math.floor(Math.random()*(b-a+1))+a);set(`<pre class="copyable">${esc(x.join('\n'))}</pre>`,x.join('\n'));});break;
+      case 'password': render(`<div class="fields-2">${field('len','الطول',{value:'16',min:4,max:128})}${field('count','عدد كلمات المرور',{value:'1',min:1,max:20})}</div><div class="fields-2">${select('symbols','الرموز',[['yes','مع رموز'],['no','بدون رموز']],'yes')}${select('numbers','الأرقام',[['yes','مع أرقام'],['no','بدون أرقام']],'yes')}</div>`,'توليد كلمات مرور');bind(()=>{const len=Math.min(128,Math.max(4,num('len'))),count=Math.min(20,Math.max(1,num('count')));let chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';if(val('numbers')==='yes')chars+='0123456789';if(val('symbols')==='yes')chars+='!@#$%^&*()-_=+[]{}';const arr=[];for(let j=0;j<count;j++){let x='';for(let i=0;i<len;i++)x+=chars[Math.floor(Math.random()*chars.length)];arr.push(x)}set(`<pre class="copyable">${esc(arr.join('\n'))}</pre>`,arr.join('\n'));});break;
+      case 'uuid': render(`<div class="fields-2">${field('count','عدد UUID',{value:'1',min:1,max:50})}${select('upper','الحروف',[['lower','صغيرة'],['upper','كبيرة']],'lower')}</div>`,'توليد UUID');bind(()=>{const n=Math.min(50,Math.max(1,num('count')));const a=Array.from({length:n},()=>crypto.randomUUID());const x=val('upper')==='upper'?a.map(v=>v.toUpperCase()):a;set(`<pre class="copyable">${esc(x.join('\n'))}</pre>`,x.join('\n'));});break;
+      case 'qr': render(areaField('text','النص أو الرابط','https://example.com')+field('size','الحجم بالبكسل',{value:'300',min:100,max:1000})+'<div class="result-note">تحتاج هذه الأداة إلى اتصال بالإنترنت لتحميل صورة QR من خدمة عامة.</div>','إنشاء QR');bind(()=>{const t=val('text').trim(),s=Math.min(1000,Math.max(100,num('size')));if(!t)return set(err('اكتب النص أو الرابط.'));const src=`https://api.qrserver.com/v1/create-qr-code/?size=${s}x${s}&data=${encodeURIComponent(t)}`;set(`<div style="text-align:center"><img src="${src}" alt="QR" style="max-width:100%;border-radius:14px;background:#fff;padding:10px"><p class="result-note">${esc(t)}</p></div>`,t);});break;
+      case 'lorem': render(field('count','عدد الكلمات',{value:'50',min:5,max:1000})+select('lang','اللغة',[['ar','عربية'],['en','إنجليزية']],'ar'),'توليد نص');bind(()=>{const n=Math.min(1000,Math.max(5,num('count')));const ar='هذا نص تجريبي يستخدم لملء المساحات واختبار التصميم والواجهات بطريقة بسيطة وسريعة ويمكن تعديله حسب الحاجة في أي مشروع أو صفحة جديدة';const en='Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua';const words=(val('lang')==='ar'?ar:en).split(' ');const a=Array.from({length:n},(_,i)=>words[i%words.length]).join(' ');set(`<p class="copyable">${esc(a)}</p>`,a);});break;
+      case 'list-random': render(areaField('list','القائمة — عنصر في كل سطر')+field('count','عدد الاختيارات',{value:'1',min:1,max:50}),'اختيار عشوائي');bind(()=>{const a=val('list').split('\n').map(x=>x.trim()).filter(Boolean);let n=Math.min(a.length,Math.max(1,num('count')));if(!a.length)return set(err('أدخل القائمة.'));const copy=[...a],out=[];while(n--){out.push(copy.splice(Math.floor(Math.random()*copy.length),1)[0])}set(`<pre class="copyable">${esc(out.join('\n'))}</pre>`,out.join('\n'));});break;
+      case 'number-to-words': render(field('number','الرقم',{type:'number',min:0,max:999999999}),'تحويل إلى كلمات');bind(()=>{const n=num('number');if(!Number.isInteger(n)||n<0||n>999999999)return set(err('أدخل عددًا صحيحًا من 0 إلى 999,999,999.'));const x=arabicWords(n);set(resultBox(x),x);});break;
+      case 'json': jsonTool(false);break;
+      case 'json-minify': jsonTool(true);break;
+      case 'base64': render(areaField('text','النص')+select('mode','العملية',[['enc','ترميز Base64'],['dec','فك Base64']],'enc'),'تنفيذ');bind(()=>{const t=val('text');try{const x=val('mode')==='enc'?b64encode(t):b64decode(t);set(`<pre class="copyable">${esc(x)}</pre>`,x)}catch(e){set(err('النص ليس Base64 صالحًا أو يحتوي على بيانات غير صحيحة.'))}});break;
+      case 'url': render(areaField('text','النص أو الرابط')+select('mode','العملية',[['enc','ترميز URL'],['dec','فك ترميز URL']],'enc'),'تنفيذ');bind(()=>{try{const x=val('mode')==='enc'?encodeURIComponent(val('text')):decodeURIComponent(val('text'));set(`<pre class="copyable">${esc(x)}</pre>`,x)}catch(e){set(err('تعذر تحويل النص.'))}});break;
+      case 'regex': render(`<div class="fields-2">${field('pattern','Regex',{type:'text',placeholder:'مثال: \\d+'})}${field('flags','Flags',{type:'text',value:'gi'})}</div>${areaField('text','النص المراد البحث داخله')}`,'اختبار Regex');bind(()=>{try{let f=val('flags');if(!f.includes('g'))f+='g';const re=new RegExp(val('pattern'),f),m=[...val('text').matchAll(re)].map(x=>x[0]);set(resultBox(m.length?`تم العثور على ${m.length} تطابق`:'لا توجد تطابقات',[[m.length,'عدد التطابقات']]),m.join('\n'))}catch(e){set(err('صيغة Regex غير صحيحة.'))}});break;
+      case 'timestamp': render(`<div class="fields-2">${select('mode','العملية',[['now','الآن'],['toDate','Unix → تاريخ'],['toUnix','تاريخ → Unix']],'now')}${field('value','القيمة',{type:'text',placeholder:'Timestamp أو 2026-01-01'})}</div>`,'تحويل الوقت');bind(()=>{const m=val('mode');let x;if(m==='now')x=Math.floor(Date.now()/1000);if(m==='toDate'){const n=Number(val('value'));if(!Number.isFinite(n))return set(err('أدخل Timestamp صالحًا.'));x=new Date(n*1000).toLocaleString('ar-EG')}if(m==='toUnix'){const d=new Date(val('value'));if(Number.isNaN(d.getTime()))return set(err('أدخل تاريخًا صالحًا.'));x=Math.floor(d.getTime()/1000)}set(resultBox(esc(x)),String(x));});break;
+      case 'html-escape': render(areaField('text','HTML أو النص'),'تحويل HTML');bind(()=>{const x=val('text');set(`<pre class="copyable">${esc(x)}</pre>`,x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'));});break;
+      case 'markdown-table': render(areaField('text','بيانات CSV أو أعمدة مفصولة بفاصلة — أول سطر عناوين'),'إنشاء جدول Markdown');bind(()=>{const rows=val('text').trim().split('\n').map(r=>r.split(',').map(x=>x.trim()));if(rows.length<2)return set(err('أدخل عنوانًا وصفًا واحدًا على الأقل.'));const header=rows[0],sep=header.map(()=> '---');const md='| '+header.join(' | ')+' |\n| '+sep.join(' | ')+' |\n'+rows.slice(1).map(r=>'| '+header.map((_,i)=>r[i]||'').join(' | ')+' |').join('\n');set(`<pre class="copyable">${esc(md)}</pre>`,md);});break;
+      case 'date-diff': render(`<div class="fields-2">${field('start','من',{type:'date'})}${field('end','إلى',{type:'date'})}</div>`,'احسب الفرق');bind(()=>{const a=parseDate('start'),b=parseDate('end');if(!a||!b)return set(err('اختر التاريخين.'));const d=Math.round(Math.abs(b-a)/86400000);set(resultBox(fmt(d)+' يوم',[[fmt(d/7,1),'أسابيع تقريبًا'],[fmt(d/30.4375,1),'أشهر تقريبًا']]),String(d)+' يوم');});break;
+      case 'add-days': render(`<div class="fields-2">${field('date','التاريخ',{type:'date'})}${field('days','عدد الأيام',{value:'30'})}</div>`,'إضافة أيام');bind(()=>{const d=parseDate('date'),n=num('days');if(!d||!Number.isFinite(n))return set(err('تحقق من التاريخ وعدد الأيام.'));d.setDate(d.getDate()+n);const x=d.toLocaleDateString('ar-EG',{year:'numeric',month:'long',day:'numeric'});set(resultBox(x),x);});break;
+      case 'week-number': render(field('date','التاريخ',{type:'date'}),'احسب رقم الأسبوع');bind(()=>{const d=parseDate('date');if(!d)return set(err('اختر تاريخًا.'));const x=isoWeek(d);set(resultBox('الأسبوع '+x),String(x));});break;
+      case 'days-year': render(field('year','السنة',{value:String(new Date().getFullYear()),min:1,max:9999}),'احسب');bind(()=>{const y=num('year');if(!Number.isInteger(y)||y<1)return set(err('أدخل سنة صحيحة.'));const x=daysInYear(y);set(resultBox(x+' يوم',[[x===366?'سنة كبيسة':'سنة عادية','نوع السنة']]),String(x));});break;
+      case 'countdown': render(`<div class="fields-2">${field('date','تاريخ الهدف',{type:'date'})}${field('time','وقت الهدف',{type:'time',value:'00:00'})}</div>`,'بدء العد التنازلي');bind(()=>{const update=()=>{const d=new Date(`${val('date')}T${val('time')||'00:00'}`);if(Number.isNaN(d.getTime()))return set(err('اختر الموعد.'));const diff=d-new Date();if(diff<=0){set(resultBox('انتهى الوقت'),'انتهى الوقت');return}const s=Math.floor(diff/1000),days=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),sec=s%60;set(resultBox(`${days} يوم`,[[String(h).padStart(2,'0')+' ساعة',''],[String(m).padStart(2,'0')+' دقيقة',''],[String(sec).padStart(2,'0')+' ثانية','']]),`${days} يوم ${h} ساعة ${m} دقيقة ${sec} ثانية`)};update();timer=setInterval(update,1000);});break;
+      case 'image-resize': imageTool('resize');break;
+      case 'image-compress': imageTool('compress');break;
+      case 'image-convert': imageTool('convert');break;
+      case 'image-crop': imageTool('crop');break;
+      case 'hex': render(areaField('text','النص')+select('mode','العملية',[['enc','نص → Hex'],['dec','Hex → نص']],'enc'),'تحويل');bind(()=>{try{const x=val('mode')==='enc'?textToHex(val('text')):hexToText(val('text'));set(`<pre class="copyable">${esc(x)}</pre>`,x)}catch(e){set(err('Hex غير صالح.'))}});break;
+      case 'binary-text': render(areaField('text','النص أو البتات')+select('mode','العملية',[['enc','نص → Binary'],['dec','Binary → نص']],'enc'),'تحويل');bind(()=>{try{const x=val('mode')==='enc'?textToBinary(val('text')):binaryToText(val('text'));set(`<pre class="copyable">${esc(x)}</pre>`,x)}catch(e){set(err('البيانات الثنائية غير صالحة.'))}});break;
+      case 'images-to-pdf': serverPdfTool('images'); break;
+      case 'text-to-pdf': serverPdfTool('text'); break;
+      case 'html-to-pdf': serverPdfTool('html'); break;
+      case 'csv-to-pdf': serverPdfTool('csv'); break;
+      case 'json-to-pdf': serverPdfTool('json'); break;
+      case 'merge-pdf': serverPdfTool('merge'); break;
+      case 'split-pdf': serverPdfTool('split'); break;
+      case 'rotate-pdf': serverPdfTool('rotate'); break;
+      case 'extract-pdf-pages': serverPdfTool('extract'); break;
+      case 'pdf-to-images': serverPdfTool('toImages'); break;
+      case 'docx-to-pdf': serverPdfTool('docx'); break;
+      case 'xlsx-to-pdf': serverPdfTool('xlsx'); break;
+      case 'image-watermark': watermarkTool(); break;
+      case 'image-merge': imageMergeTool(); break;
+      case 'image-batch-resize': imageBatchTool(); break;
+      case 'password-strength': passwordStrengthTool(); break;
+      case 'hash': hashTool(); break;
+      case 'yaml-json': yamlJsonTool(); break;
+      case 'sql-format': sqlFormatTool(); break;
+      case 'color-convert': colorConvertTool(); break;
+      case 'cron': cronTool(); break;
+      default: root.innerHTML=err('هذه الأداة غير معرفة في محرك إنجاز.');
+    }
+  }
+
+  function updateAreaFields(){const e=$('#shapeFields');if(!e)return;const s=val('shape');e.innerHTML=s==='rect'?`<div class="fields-2">${field('a','الطول')}${field('b','العرض')}</div>`:s==='triangle'?`<div class="fields-2">${field('a','القاعدة')}${field('b','الارتفاع')}</div>`:field('a',s==='circle'?'نصف القطر':'الضلع');}
+  function updateVolumeFields(){const e=$('#shapeFields');if(!e)return;const s=val('shape');e.innerHTML=s==='box'?`<div class="fields-3">${field('a','الطول')}${field('b','العرض')}${field('c','الارتفاع')}</div>`:s==='cylinder'?`<div class="fields-2">${field('a','نصف القطر')}${field('b','الارتفاع')}</div>`:field('a',s==='sphere'?'نصف القطر':'الضلع');}
+  function converter(name,units,selected){render(`<div class="fields-3">${field('value','القيمة')}${select('from','من',units.map(x=>[x[0],x[1]]),selected)}${select('to','إلى',units.map(x=>[x[0],x[1]]),units[1]?.[0]||units[0][0])}</div>`,'تحويل '+name);bind(()=>{const a=num('value'),f=val('from'),t=val('to'),fm=Object.fromEntries(units.map(x=>[x[0],x[2]]));if(!Number.isFinite(a))return set(err('أدخل قيمة صحيحة.'));const x=a*fm[f]/fm[t];set(resultBox(fmt(x,6),[[units.find(u=>u[0]===f)?.[1]||f,'الوحدة الأصلية'],[units.find(u=>u[0]===t)?.[1]||t,'الوحدة الجديدة']]),fmt(x,6));});}
+  function textStats(name,words){render(areaField('text','النص') ,'احسب');bind(()=>{const t=val('text'),chars=[...t].length,without=t.replace(/\s/g,'').length,lines=t?t.split(/\n/).length:0,ws=t.trim()?t.trim().split(/\s+/).length:0;set(resultBox(words?fmt(ws)+' كلمة':fmt(chars)+' حرف',[[fmt(chars),'إجمالي الأحرف'],[fmt(without),'بدون مسافات'],[fmt(lines),'الأسطر']]),words?`${ws} كلمة | ${chars} حرف`: `${chars} حرف`);});}
+  function extractor(name,re){render(areaField('text','النص') ,'استخراج');bind(()=>{const a=val('text').match(re)||[];const unique=[...new Set(a)];set(resultBox(`<pre class="copyable">${esc(unique.join('\n'))}</pre>`,[[unique.length,name+' فريدة']]),unique.join('\n'));});}
+  function jsonTool(minify){render(areaField('text','JSON'),'تنسيق JSON');bind(()=>{try{const obj=JSON.parse(val('text'));const x=JSON.stringify(obj,null,minify?0:2);set(`<pre class="copyable">${esc(x)}</pre>`,x)}catch(e){set(err('JSON غير صالح. تحقق من الأقواس والفواصل وعلامات الاقتباس.'))}});}
+  function b64encode(s){const bytes=new TextEncoder().encode(s);let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));return btoa(bin)}
+  function b64decode(s){const bin=atob(s.replace(/\s/g,''));const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));return new TextDecoder().decode(bytes)}
+  function isoWeek(d){const x=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=x.getUTCDay()||7;x.setUTCDate(x.getUTCDate()+4-day);const y=new Date(Date.UTC(x.getUTCFullYear(),0,1));return Math.ceil((((x-y)/86400000)+1)/7)}
+  function textToHex(s){return Array.from(new TextEncoder().encode(s),b=>b.toString(16).padStart(2,'0')).join(' ')}
+  function hexToText(s){const a=s.trim().split(/[\s,]+/).filter(Boolean).map(x=>parseInt(x,16));if(a.some(x=>Number.isNaN(x)||x<0||x>255))throw Error();return new TextDecoder().decode(new Uint8Array(a))}
+  function textToBinary(s){return Array.from(new TextEncoder().encode(s),b=>b.toString(2).padStart(8,'0')).join(' ')}
+  function binaryToText(s){const a=s.trim().split(/\s+/).filter(Boolean).map(x=>parseInt(x,2));if(a.some(x=>Number.isNaN(x)||x<0||x>255))throw Error();return new TextDecoder().decode(new Uint8Array(a))}
+  function arabicWords(n){if(n===0)return 'صفر';const ones=['','واحد','اثنان','ثلاثة','أربعة','خمسة','ستة','سبعة','ثمانية','تسعة','عشرة','أحد عشر','اثنا عشر','ثلاثة عشر','أربعة عشر','خمسة عشر','ستة عشر','سبعة عشر','ثمانية عشر','تسعة عشر'];const tens=['','','عشرون','ثلاثون','أربعون','خمسون','ستون','سبعون','ثمانون','تسعون'];const under100=x=>x<20?ones[x]:x%10?tens[Math.floor(x/10)]+' و'+ones[x%10]:tens[Math.floor(x/10)];const under1000=x=>{if(x<100)return under100(x);const h=Math.floor(x/100),r=x%100;const hw=['','مائة','مائتان','ثلاثمائة','أربعمائة','خمسمائة','ستمائة','سبعمائة','ثمانمائة','تسعمائة'][h];return r?hw+' و'+under100(r):hw};const groups=[['مليار','ملياران','مليارات'],['مليون','مليونان','ملايين'],['ألف','ألفان','آلاف'],['','','']];let rem=n,parts=[];const vals=[1e9,1e6,1e3,1];for(let i=0;i<vals.length;i++){const q=Math.floor(rem/vals[i]);rem%=vals[i];if(!q)continue;if(i===3)parts.push(under1000(q));else if(q===1)parts.push(groups[i][0]);else if(q===2)parts.push(groups[i][1]);else if(q>=3&&q<=10)parts.push(under1000(q)+' '+groups[i][2]);else parts.push(under1000(q)+' '+groups[i][0]);}return parts.join(' و')}
+  function imageTool(mode){
+    let extra='';
+    if(mode==='resize')extra=`<div class="fields-2">${field('width','العرض',{min:1})}${field('height','الارتفاع',{min:1})}</div>`;
+    if(mode==='compress')extra=field('quality','الجودة %',{value:'80',min:10,max:100});
+    if(mode==='convert')extra=select('format','الصيغة',[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP']],'image/png');
+    if(mode==='crop')extra=`<div class="fields-2">${field('width','عرض القص',{min:1})}${field('height','ارتفاع القص',{min:1})}</div>`;
+    root.innerHTML=`<div class="tool-form"><div class="field"><label for="file">اختر صورة</label><input id="file" type="file" accept="image/*"></div>${extra}${mode==='resize'?'<label><input id="keep" type="checkbox" checked> الحفاظ على النسبة</label>':''}${run(mode==='resize'?'تغيير الحجم':mode==='compress'?'ضغط الصورة':mode==='convert'?'تحويل الصورة':'قص الصورة')}</div>`;
+    $('#runTool')?.addEventListener('click',()=>processImage(mode));
+  }
+  function processImage(mode){const file=$('#file')?.files?.[0];if(!file)return set(err('اختر صورة أولًا.'));const img=new Image();img.onload=()=>{let w=img.width,h=img.height;if(mode==='resize'){w=Math.max(1,num('width'));h=Math.max(1,num('height'));if($('#keep')?.checked){const ratio=img.width/img.height;if(!num('height')&&num('width'))h=Math.round(w/ratio);else if(num('width')&&!num('height'))h=Math.round(w/ratio);}}if(mode==='crop'){w=Math.min(Math.max(1,num('width')),img.width);h=Math.min(Math.max(1,num('height')),img.height)}const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');let sx=0,sy=0,sw=img.width,sh=img.height;if(mode==='crop'){sw=w;sh=h;sx=Math.max(0,(img.width-w)/2);sy=Math.max(0,(img.height-h)/2)}ctx.drawImage(img,sx,sy,sw,sh,0,0,w,h);const mime=mode==='convert'?val('format'):(mode==='compress'?'image/jpeg':file.type||'image/png');const quality=mode==='compress'?Math.min(1,Math.max(.1,num('quality')/100)):.9;canvas.toBlob(blob=>{if(!blob)return set(err('تعذر معالجة الصورة.'));const url=URL.createObjectURL(blob);const kb=(blob.size/1024).toFixed(1);set(`<div style="text-align:center"><img src="${url}" alt="نتيجة الصورة" style="max-width:100%;max-height:420px;border-radius:14px"><p class="result-note">الحجم: ${esc(kb)} KB — الأبعاد: ${w}×${h}</p><a class="primary-btn" href="${url}" download="engaz-${mode}.${mime==='image/png'?'png':mime==='image/webp'?'webp':'jpg'}">⬇ حفظ الصورة</a></div>`,`${w}x${h} — ${kb} KB`)},mime,quality)};img.src=URL.createObjectURL(file)}
+
+  init();
+})();

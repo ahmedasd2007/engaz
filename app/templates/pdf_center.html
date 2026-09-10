@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}مركز الملفات وPDF — إنجاز{% endblock %}
+{% block content %}
+<div class="container tool-page">
+<section class="hero-card" style="padding:34px;margin-bottom:20px"><span class="eyebrow">🚀 مركز الملفات الاحترافي</span><h1>إنشاء وتحويل PDF فعليًا</h1><p>كل عملية ترسل إلى محرك إنجاز على السيرفر وتعيد ملفًا جاهزًا للتنزيل.</p></section>
+<div class="file-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+{% for k,n in [('images','🖼️ صور → PDF'),('text','📝 نص → PDF'),('csv','📊 CSV → PDF'),('json','{} JSON → PDF'),('html','🌐 HTML → PDF'),('office','📎 Office → PDF'),('merge','🧩 دمج PDF'),('split','✂️ استخراج صفحات'),('rotate','🔄 تدوير PDF'),('to-images','📷 PDF → صور'),('table','📋 جدول → PDF')] %}<button class="file-tab" type="button" data-kind="{{k}}">{{n}}</button>{% endfor %}</div>
+<div id="pdfApp" class="card" style="padding:28px"></div><div id="pdfStatus" class="result-note" hidden></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(()=>{
+ const app=document.getElementById('pdfApp'),status=document.getElementById('pdfStatus'),tabs=[...document.querySelectorAll('.file-tab')];
+ const endpoints={images:"{{ url_for('main.pdf_images_api') }}",text:"{{ url_for('main.pdf_text_api') }}",csv:"{{ url_for('main.pdf_csv_api') }}",json:"{{ url_for('main.pdf_json_api') }}",html:"{{ url_for('main.pdf_html_api') }}",office:"{{ url_for('main.pdf_office_api') }}",merge:"{{ url_for('main.pdf_merge_api') }}",split:"{{ url_for('main.pdf_split_api') }}",rotate:"{{ url_for('main.pdf_rotate_api') }}",toImages:"{{ url_for('main.pdf_to_images_api') }}",table:"{{ url_for('main.pdf_table_api') }}"};
+ const forms={
+ images:`<h2>🖼️ صور → PDF</h2><p>اختر عدة صور وسيتم وضع كل صورة في صفحة مستقلة.</p><div class="field"><input type="file" name="files" accept="image/*" multiple required></div><select class="field" name="page"><option value="a4">A4</option><option value="a5">A5</option><option value="letter">Letter</option></select>`,
+ text:`<h2>📝 نص → PDF</h2><input class="field" name="title" value="إنجاز — ملف PDF"><textarea class="field" name="text" rows="16" placeholder="اكتب النص هنا..." required></textarea>`,
+ csv:`<h2>📊 CSV → PDF</h2><input class="field" name="title" value="إنجاز — CSV"><textarea class="field" name="data" rows="14" placeholder="الاسم,الكمية,السعر&#10;منتج 1,10,25" required></textarea>`,
+ json:`<h2>{} JSON → PDF</h2><input class="field" name="title" value="إنجاز — JSON"><textarea class="field" name="data" rows="14" placeholder='{"name":"Engaz"}' required></textarea>`,
+ html:`<h2>🌐 HTML → PDF</h2><input class="field" name="title" value="إنجاز — HTML"><textarea class="field" name="data" rows="14" placeholder="<h1>عنوان</h1>" required></textarea>`,
+ office:`<h2>📎 Office → PDF</h2><p>يتطلب LibreOffice مثبتًا على الجهاز الذي يشغل الخادم.</p><div class="field"><input class="field" type="file" name="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp" required></div>`,
+ merge:`<h2>🧩 دمج PDF</h2><div class="field"><input class="field" type="file" name="files" accept="application/pdf,.pdf" multiple required></div>`,
+ split:`<h2>✂️ استخراج صفحات PDF</h2><input class="field" type="file" name="file" accept="application/pdf,.pdf" required><input class="field" name="pages" placeholder="1,3,5 أو 2-4" required>`,
+ rotate:`<h2>🔄 تدوير PDF</h2><input class="field" type="file" name="file" accept="application/pdf,.pdf" required><select class="field" name="degrees"><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>`,
+ 'to-images':`<h2>📷 PDF → صور</h2><input class="field" type="file" name="file" accept="application/pdf,.pdf" required><select class="field" name="format"><option value="png">PNG</option><option value="jpg">JPG</option></select><input class="field" type="number" name="dpi" value="150" min="72" max="300">`,
+ table:`<h2>📋 جدول → PDF</h2><input class="field" name="title" value="إنجاز — تقرير"><textarea class="field" name="data" rows="12" placeholder="الاسم,الكمية,السعر&#10;منتج 1,10,25" required></textarea>`
+ };
+ function render(k){tabs.forEach(t=>t.classList.toggle('active',t.dataset.kind===k));app.innerHTML=`<div class="pdf-center-form" data-kind="${k}">${forms[k]||forms.images}<button type="button" class="file-btn file-primary" id="pdfCenterRun">📄 إنشاء وتحميل الملف</button><div class="result-note" id="pdfCenterProgress" hidden></div></div>`;document.getElementById('pdfCenterRun').onclick=()=>run(k);}
+ function nameFromHeader(h,fallback){const m=(h||'').match(/filename\*=(?:UTF-8'')?([^;]+)/i);if(m){try{return decodeURIComponent(m[1].replace(/^"|"$/g,''))}catch(_){}}const p=(h||'').match(/filename="?([^";]+)"?/i);return p?p[1]:fallback;}
+ async function run(k){const box=app.querySelector('.pdf-center-form'),btn=document.getElementById('pdfCenterRun'),progress=document.getElementById('pdfCenterProgress');if(!box||btn.dataset.busy==='1')return;const els=[...box.querySelectorAll('input,select,textarea')];for(const el of els){if(el.required&&((el.type==='file'&&!el.files.length)||(el.type!=='file'&&!String(el.value||'').trim()))){el.reportValidity?.();return}};btn.dataset.busy='1';btn.disabled=true;btn.textContent='⏳ جاري المعالجة...';progress.hidden=false;progress.textContent='⏳ جاري رفع ومعالجة الملف...';const fd=new FormData();els.forEach(el=>{if(!el.name)return;if(el.type==='file')for(const f of el.files)fd.append(el.name,f,f.name);else fd.append(el.name,el.value)});const rid=`engaz-center-${Date.now()}-${Math.random().toString(36).slice(2)}`;fd.append('_request_id',rid);try{const r=await fetch(endpoints[k],{method:'POST',body:fd,credentials:'same-origin',cache:'no-store',headers:{'X-Engaz-Request':rid,Accept:'application/pdf,application/zip,application/json'}});if(!r.ok){let msg=`فشل إنشاء الملف (${r.status})`;try{const j=await r.json();msg=j.error||msg}catch(_){}throw Error(msg)}const blob=await r.blob();if(!blob.size)throw Error('الخادم أعاد ملفًا فارغًا.');const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=nameFromHeader(r.headers.get('Content-Disposition'),k==='to-images'?'engaz-pdf-images.zip':'engaz-output.pdf');document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);progress.textContent='✓ تم إنشاء الملف وبدء التنزيل.';status.hidden=false;status.textContent='✓ تمت العملية بنجاح.'}catch(e){console.error(e);progress.textContent='⚠ '+(e.message||'تعذر الاتصال بخدمة PDF.');status.hidden=false;status.textContent=progress.textContent}finally{btn.dataset.busy='0';btn.disabled=false;btn.textContent='📄 إنشاء وتحميل الملف';}}
+ tabs.forEach(t=>t.addEventListener('click',()=>render(t.dataset.kind)));render('{{ kind }}'.replace('images-to-pdf','images').replace('text-to-pdf','text'));
+})();
+</script>
+{% endblock %}

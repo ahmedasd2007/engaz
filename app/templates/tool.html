@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ tool[2] }} | إنجاز{% endblock %}
+{% block meta %}{{ tool[4] }} — أداة {{ tool[2] }} مجانية وسريعة من إنجاز.{% endblock %}
+{% block structured_data %}<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"{{ tool[2] }}","description":"{{ tool[4] }}","applicationCategory":"UtilitiesApplication","operatingSystem":"Web","url":"{{ request.url }}"}</script>{% endblock %}
+{% block content %}
+<div class="container tool-page">
+  <nav class="breadcrumb"><a href="{{ url_for('main.home') }}">الرئيسية</a><span>‹</span><a href="{{ url_for('main.category',slug=category[0]) }}">{{ category[2] }}</a><span>‹</span><strong>{{ tool[2] }}</strong></nav>
+  <section class="tool-heading"><div class="tool-heading-icon">{{ tool[3] }}</div><div><span class="eyebrow">{{ category[2] }}</span><h1>{{ tool[2] }}</h1><p>{{ tool[4] }}</p><div class="badges"><span>✓ مجاني</span><span>⚡ سريع</span><span>🔒 خصوصية أفضل</span></div></div></section>
+  <div class="tool-layout">
+    <main>
+      <section class="tool-workspace"><div class="workspace-top"><div><b>أداة {{ tool[2] }}</b><small>أدخل البيانات ثم اضغط تنفيذ</small></div><span class="ready-dot"><i></i> جاهز</span></div><div id="toolRoot"
+ data-tool="{{ tool[5] }}" data-slug="{{ tool[0] }}"
+ data-pdf-images="{{ url_for('main.pdf_images_api') }}"
+ data-pdf-text="{{ url_for('main.pdf_text_api') }}"
+ data-pdf-html="{{ url_for('main.pdf_html_api') }}"
+ data-pdf-csv="{{ url_for('main.pdf_csv_api') }}"
+ data-pdf-json="{{ url_for('main.pdf_json_api') }}"
+ data-pdf-merge="{{ url_for('main.pdf_merge_api') }}"
+ data-pdf-split="{{ url_for('main.pdf_split_api') }}"
+ data-pdf-rotate="{{ url_for('main.pdf_rotate_api') }}"
+ data-pdf-extract="{{ url_for('main.pdf_split_api') }}"
+ data-pdf-to-images="{{ url_for('main.pdf_to_images_api') }}"
+ data-pdf-docx="{{ url_for('main.pdf_office_api') }}"
+ data-pdf-xlsx="{{ url_for('main.pdf_office_api') }}"></div><div class="tool-bottom-actions"><button id="toolCopy" class="secondary-btn" hidden>📋 نسخ النتيجة</button><button id="toolReset" class="ghost-btn">↺ إعادة تعيين</button></div><div id="toolResult" class="tool-result" hidden aria-live="polite"></div></section>
+      <section class="info-card"><h2>طريقة الاستخدام</h2><div class="steps"><div><b>1</b><p><strong>أدخل البيانات</strong><span>املأ الحقول المطلوبة.</span></p></div><div><b>2</b><p><strong>نفّذ العملية</strong><span>اضغط زر الحساب أو التحويل.</span></p></div><div><b>3</b><p><strong>انسخ النتيجة</strong><span>استخدم زر النسخ لحفظ النتيجة.</span></p></div></div></section>
+      <section class="info-card"><h2>عن {{ tool[2] }}</h2><p>{{ tool[4] }}</p><p>صممت الأداة لتكون مباشرة وسهلة، وتعمل من المتصفح بدون تثبيت برنامج إضافي للعمليات المحلية.</p></section>
+      <section class="info-card faq"><h2>الأسئلة الشائعة</h2><details><summary>هل الأداة مجانية؟</summary><p>نعم، أداة {{ tool[2] }} متاحة مجانًا.</p></details><details><summary>هل تعمل على الهاتف؟</summary><p>نعم، الواجهة متجاوبة مع الهاتف والكمبيوتر.</p></details><details><summary>هل يتم حفظ البيانات؟</summary><p>العمليات المحلية الأساسية تنفذ داخل المتصفح ولا تحتاج إلى حفظ البيانات على الخادم.</p></details></section>
+    </main>
+    <aside class="tool-sidebar"><div class="ad-box">إعلان</div><div class="side-card"><span>🛡️</span><h3>مصمم للسهولة</h3><p>واجهة واضحة ونتائج مباشرة بدون تعقيد.</p></div><div class="side-card"><span>📚</span><h3>المزيد من {{ category[2] }}</h3>{% for r in related %}<a class="related-link" href="{{ url_for('main.tool',slug=r[0]) }}"><span>{{ r[3] }}</span>{{ r[2] }} <b>←</b></a>{% endfor %}</div></aside>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static',filename='js/tools.js', v=18) }}"></script>
+{% endblock %}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="{% block meta %}{{ site_description }}{% endblock %}">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="{{ request.url }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <title>{% block title %}إنجاز — أدوات عربية ذكية ومجانية{% endblock %}</title>
+  {% block structured_data %}{% endblock %}
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+<header class="site-header">
+  <div class="container nav-wrap">
+    <a class="brand" href="{{ url_for('main.home') }}" aria-label="إنجاز - الرئيسية">
+      <span class="brand-mark">إ</span>
+      <span>إنجاز</span>
+    </a>
+    <nav class="desktop-nav" aria-label="التنقل الرئيسي">
+      <a href="{{ url_for('main.home') }}">الرئيسية</a>
+      <a href="{{ url_for('main.home') }}#categories">الأقسام</a>
+      <a href="{{ url_for('main.home') }}#popular">الأدوات</a>
+    <a href="{{ url_for('main.category', slug='files') }}">📁 الملفات وPDF</a>
+      <a href="{{ url_for('main.about') }}">عن إنجاز</a>
+    </nav>
+    <div class="nav-actions">
+      <button id="theme" class="icon-btn" type="button" title="الوضع الليلي" aria-label="تبديل الوضع الليلي">◐</button>
+      <button id="menu" class="icon-btn mobile-only" type="button" aria-label="فتح القائمة">☰</button>
+    </div>
+  </div>
+  <div id="mobileNav" class="mobile-nav">
+    <a href="{{ url_for('main.home') }}">الرئيسية</a>
+    <a href="{{ url_for('main.home') }}#categories">الأقسام</a>
+    <a href="{{ url_for('main.home') }}#popular">الأدوات</a>
+      <a href="{{ url_for('main.category', slug='files') }}">📁 الملفات وPDF</a>
+    <a href="{{ url_for('main.about') }}">عن إنجاز</a>
+  </div>
+</header>
+
+<main>{% block content %}{% endblock %}</main>
+
+<footer class="site-footer">
+  <div class="container footer-grid">
+    <div>
+      <a class="brand footer-brand" href="{{ url_for('main.home') }}"><span class="brand-mark">إ</span><span>إنجاز</span></a>
+      <p>كل الأدوات التي تحتاجها لإنجاز مهامك اليومية بسرعة وبدون تعقيد.</p>
+    </div>
+    <div>
+      <h3>الأقسام</h3>
+      <a href="{{ url_for('main.category', slug='calculators') }}">الحاسبات</a>
+      <a href="{{ url_for('main.category', slug='converters') }}">المحوّلات</a>
+      <a href="{{ url_for('main.category', slug='text') }}">النصوص</a>
+      <a href="{{ url_for('main.category', slug='developer') }}">المبرمجين</a>
+    </div>
+    <div>
+      <h3>إنجاز</h3>
+      <a href="{{ url_for('main.about') }}">عن الموقع</a>
+      <a href="{{ url_for('main.privacy') }}">الخصوصية</a>
+      <a href="{{ url_for('main.terms') }}">الشروط</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© {{ year }} إنجاز — جميع الحقوق محفوظة</div>
+</footer>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

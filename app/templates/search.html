@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}البحث في أدوات إنجاز{% endblock %}
+{% block meta %}ابحث في جميع أدوات إنجاز العربية المجانية واعثر على الحاسبة أو المحول أو الأداة التي تحتاجها.{% endblock %}
+{% block content %}
+<div class="container page-shell">
+  <nav class="breadcrumb"><a href="{{ url_for('main.home') }}">الرئيسية</a><span>‹</span><strong>البحث</strong></nav>
+  <div class="search-page-head"><span class="eyebrow">البحث الذكي</span><h1>{% if q %}نتائج البحث عن «{{ q }}»{% else %}كل أدوات إنجاز{% endif %}</h1><p>اكتب اسم الأداة أو وظيفتها للوصول إليها بسرعة.</p></div>
+  <form class="big-search" action="{{ url_for('main.search') }}"><span>⌕</span><input name="q" value="{{ q }}" placeholder="ابحث عن أداة..."><button>بحث</button></form>
+  {% if results %}<div class="result-bar"><b>{{ results|length }}</b> نتيجة متاحة</div><div class="tool-grid">{% for t in results %}<a class="tool-card-link" href="{{ url_for('main.tool', slug=t[0]) }}"><span class="tool-icon">{{ t[3] }}</span><div><small class="result-cat">{{ t[1] }}</small><h3>{{ t[2] }}</h3><p>{{ t[4] }}</p></div><span class="arrow">←</span></a>{% endfor %}</div>{% else %}<div class="empty-state"><div>⌕</div><h2>لا توجد نتائج</h2><p>جرّب كلمات مثل: عمر، نسبة، JSON، صورة، قرض.</p><a class="primary-btn" href="{{ url_for('main.home') }}">العودة للرئيسية</a></div>{% endif %}
+</div>
+{% endblock %}

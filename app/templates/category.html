@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ category[2] }} | إنجاز{% endblock %}
+{% block meta %}{{ category[3] }} — أدوات إنجاز المجانية{% endblock %}
+{% block content %}
+<div class="container page-shell">
+  <nav class="breadcrumb"><a href="{{ url_for('main.home') }}">الرئيسية</a><span>‹</span><strong>{{ category[2] }}</strong></nav>
+  <section class="category-hero"><div class="big-category-icon">{{ category[1] }}</div><div><span class="eyebrow">قسم إنجاز</span><h1>{{ category[2] }}</h1><p>{{ category[3] }}</p><div class="category-meta"><b>{{ tools|length }} أداة</b><span>•</span><span>مجانية</span><span>•</span><span>متاحة 24/7</span></div></div></section>
+  <div class="local-search"><span>⌕</span><input id="categorySearch" placeholder="ابحث داخل هذا القسم..." autocomplete="off"><span id="categoryCount">{{ tools|length }}</span></div>
+  <div id="categoryTools" class="tool-grid category-tools">{% for t in tools %}<a class="tool-card-link category-tool" data-search="{{ (t[2] ~ ' ' ~ t[4])|lower }}" href="{{ url_for('main.tool', slug=t[0]) }}"><span class="tool-icon">{{ t[3] }}</span><div><h3>{{ t[2] }}</h3><p>{{ t[4] }}</p></div><span class="arrow">←</span></a>{% endfor %}</div>
+  <div id="categoryEmpty" class="empty-state" hidden><div>⌕</div><h2>لم نجد أداة مطابقة</h2><p>جرّب كلمة بحث أخرى.</p></div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{const i=document.getElementById('categorySearch'),cards=[...document.querySelectorAll('.category-tool')],c=document.getElementById('categoryCount'),e=document.getElementById('categoryEmpty');i?.addEventListener('input',()=>{const q=i.value.trim().toLowerCase();let n=0;cards.forEach(x=>{const ok=!q||x.dataset.search.includes(q);x.hidden=!ok;if(ok)n++});c.textContent=n;e.hidden=n!==0})});
+</script>
+{% endblock %}

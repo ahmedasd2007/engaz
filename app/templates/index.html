@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}إنجاز — أكثر من 60 أداة عربية مجانية
+<section class="container" style="padding:0 16px 30px">
+  <a href="{{ url_for('main.pdf_center') }}" style="display:block;text-decoration:none;color:inherit">
+    <div style="padding:24px;border-radius:22px;background:linear-gradient(135deg,#eef5ff,#f7f1ff);border:1px solid #e5eaf1;display:flex;justify-content:space-between;align-items:center;gap:15px">
+      <div><b style="font-size:21px">📁 مركز الملفات و PDF</b><p style="margin:7px 0 0;color:#64748b">صور، نصوص، HTML، CSV، JSON، دمج وتقسيم PDF.</p></div>
+      <span style="font-weight:800;color:#2563eb">ابدأ الآن ←</span>
+    </div>
+  </a>
+</section>
+{% endblock %}
+{% block meta %}إنجاز منصة عربية مجانية للحاسبات والمحوّلات وأدوات النصوص والمبرمجين والمال والتاريخ والصور. أنجز مهمتك بسرعة من المتصفح.{% endblock %}
+{% block structured_data %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"إنجاز","url":"{{ request.url_root }}","potentialAction":{"@type":"SearchAction","target":"{{ request.url_root }}search?q={search_term_string}","query-input":"required name=search_term_string"}}
+</script>
+{% endblock %}
+{% block content %}
+<section class="hero-section">
+  <div class="container hero-grid">
+    <div class="hero-copy">
+      <div class="eyebrow"><span>✦</span> منصة إنجاز الرقمية</div>
+      <h1>أنجزها الآن.<br><span>بأداة واحدة.</span></h1>
+      <p>حاسبات، محوّلات، أدوات نصوص، برمجة، مال، تاريخ وصور — كل ما تحتاجه في مكان واحد، سريع ومجاني.</p>
+      <form class="hero-search" action="{{ url_for('main.search') }}">
+        <span>⌕</span><input name="q" autocomplete="off" placeholder="ماذا تريد أن تنجز اليوم؟ مثال: حاسبة العمر" aria-label="البحث عن أداة"><button>ابحث</button>
+      </form>
+      <div class="search-hints"><span>الأكثر طلبًا:</span><a href="/tool/age">العمر</a><a href="/tool/percentage">النسبة</a><a href="/tool/word-count">الكلمات</a><a href="/tool/password">كلمة مرور</a></div>
+    </div>
+    <div class="hero-visual">
+      <div class="hero-glow"></div>
+      <div class="dashboard-card">
+        <div class="dash-top"><div><small>لوحة إنجاز</small><strong>جاهز للإنجاز</strong></div><span class="live"><i></i> يعمل الآن</span></div>
+        <div class="dash-stats"><div><strong>{{ tools|length }}+</strong><span>أداة</span></div><div><strong>{{ categories|length }}</strong><span>قسم</span></div><div><strong>24/7</strong><span>متاح</span></div></div>
+        <div class="mini-chart"><span style="height:30%"></span><span style="height:45%"></span><span style="height:38%"></span><span style="height:62%"></span><span style="height:55%"></span><span style="height:78%"></span><span style="height:90%"></span></div>
+        <div class="dash-tool"><span>🧮</span><div><b>حاسبات ذكية</b><small>نتائج فورية ودقيقة</small></div><em>←</em></div>
+        <div class="dash-tool"><span>💻</span><div><b>أدوات المبرمجين</b><small>JSON • URL • Base64 • Regex</small></div><em>←</em></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="categories">
+  <div class="container">
+    <div class="section-head"><div><span class="eyebrow">استكشف</span><h2>الأقسام الرئيسية</h2><p>اختر المجال الذي تريد إنجاز مهمته.</p></div><span class="section-count">{{ categories|length }} أقسام</span></div>
+    <div class="category-grid">
+      {% for c in categories %}<a class="category-card" href="{{ url_for('main.category', slug=c[0]) }}"><span class="category-icon">{{ c[1] }}</span><div><h3>{{ c[2] }}</h3><p>{{ c[3] }}</p></div><span class="arrow">←</span></a>{% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section section-soft" id="popular">
+  <div class="container">
+    <div class="section-head"><div><span class="eyebrow">ابدأ فورًا</span><h2>أدوات إنجاز</h2><p>أدوات عملية للاستخدام اليومي.</p></div><a class="outline-btn" href="{{ url_for('main.search') }}">عرض كل الأدوات ←</a></div>
+    <div class="tool-grid">
+      {% for t in tools[:16] %}<a class="tool-card-link" href="{{ url_for('main.tool', slug=t[0]) }}"><span class="tool-icon">{{ t[3] }}</span><div><h3>{{ t[2] }}</h3><p>{{ t[4] }}</p></div><span class="arrow">←</span></a>{% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section files-showcase" id="files">
+  <div class="container">
+    <div class="section-head"><div><span class="eyebrow">جديد في إنجاز</span><h2>📁 مركز الملفات وPDF</h2><p>حوّل ملفاتك وأنجز أعمال المستندات من مكان واحد.</p></div><a class="outline-btn" href="{{ url_for('main.category', slug='files') }}">كل أدوات الملفات ←</a></div>
+    <div class="file-feature-grid">
+      {% for t in tools if t[1] == 'files' %}
+      {% if loop.index <= 8 %}<a class="file-feature-card" href="{{ url_for('main.tool', slug=t[0]) }}"><span>{{ t[3] }}</span><div><b>{{ t[2] }}</b><small>{{ t[4] }}</small></div><i>←</i></a>{% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="features-section"><div class="container feature-grid"><div><span>⚡</span><strong>سريع</strong><p>نتائج مباشرة بدون خطوات زائدة.</p></div><div><span>📱</span><strong>متجاوب</strong><p>مصمم للموبايل والكمبيوتر.</p></div><div><span>🔒</span><strong>خصوصية</strong><p>أدوات كثيرة تعمل محليًا داخل المتصفح.</p></div><div><span>🧩</span><strong>متجدد</strong><p>بنية جاهزة لإضافة أدوات جديدة.</p></div></div></section>
+
+<section class="cta-section"><div class="container cta"><div><span class="eyebrow">جاهز؟</span><h2>ابدأ إنجاز مهمتك الآن</h2><p>ابحث عن الأداة المناسبة وستحصل على النتيجة في ثوانٍ.</p></div><a href="{{ url_for('main.search') }}" class="primary-btn">اكتشف الأدوات ←</a></div></section>
+{% endblock %}
